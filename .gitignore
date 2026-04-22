@@ -8,5 +8,4 @@ dist/
 build/
 .DS_Store
 .codebuddy/
-.env
-frontend/config.js
+.github/

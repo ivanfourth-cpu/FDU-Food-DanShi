@@ -1,17 +1,17 @@
 {
-  "name": "danshi-review",
-  "version": "1.0.0",
-  "description": "旦食 - 复旦大学美食点评网站",
+  "name": "danshi-app",
+  "version": "1.5.5",
+  "description": "旦食 (FDU Food) - 复旦人的美食点评系统",
   "main": "backend/server.js",
   "scripts": {
     "start": "node backend/server.js",
     "dev": "node backend/server.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "better-sqlite3": "^9.4.3",
+    "better-sqlite3": "^11.3.0",
     "cors": "^2.8.5",
-    "nodemailer": "^6.9.8",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "nodemailer": "^6.9.15"
   }
 }
