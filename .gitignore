@@ -1,0 +1,12 @@
+node_modules/
+.env
+.env.*
+frontend/config.js
+*.db
+/var/lib/fdufood/
+dist/
+build/
+.DS_Store
+.codebuddy/
+.env
+frontend/config.js
