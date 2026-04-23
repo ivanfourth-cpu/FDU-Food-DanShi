@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>旦食 - 复旦美食点评</title>
+  <script src="https://cdn.jsdelivr.net/npm/vue@3.3.4/dist/vue.global.prod.js"></script>
+  <link rel="stylesheet" href="css/style.css?v=1.3.0_beta">
+</head>
+<body>
+  <div id="app">
+    <!-- ========== 开机封面 ========== -->
+    <div class="splash-screen page-view" v-if="currentPage === 'splash'" :class="{ exiting: isExiting }">
+      <!-- 极光流体背景 Canvas -->
+      <canvas ref="auroraCanvas" class="aurora-canvas"></canvas>
+      
+      <!-- 玻璃拟态悬浮关键词 -->
+      <div class="floating-bubbles">
+        <div class="bubble bubble-1" @mouseenter="onBubbleHover(1)" @mouseleave="onBubbleLeave(1)">
+          <span>#北食鹅肝汉堡</span>
+        </div>
+        <div class="bubble bubble-2" @mouseenter="onBubbleHover(2)" @mouseleave="onBubbleLeave(2)">
+          <span>#旦苑小炒</span>
+        </div>
+        <div class="bubble bubble-3" @mouseenter="onBubbleHover(3)" @mouseleave="onBubbleLeave(3)">
+          <span>#南食干锅</span>
+        </div>
+        <div class="bubble bubble-4" @mouseenter="onBubbleHover(4)" @mouseleave="onBubbleLeave(4)">
+          <span>#六星顶流</span>
+        </div>
+        <div class="bubble bubble-5" @mouseenter="onBubbleHover(5)" @mouseleave="onBubbleLeave(5)">
+          <span>#真诚推荐</span>
+        </div>
+      </div>
+
+      <!-- 玻璃拟态中心交互区 -->
+      <div class="glass-card">
+        <div class="glass-card-inner">
+          <div class="splash-logo">旦食</div>
+          <p class="splash-tagline">复旦人的美食指南</p>
+          <div class="splash-auth-buttons">
+            <button class="glass-btn auth-btn" @click="goToPage('login')">
+              <span>登录</span>
+              <div class="btn-shine"></div>
+            </button>
+            <button class="glass-btn auth-btn register-btn" @click="goToPage('register')">
+              <span>注册</span>
+              <div class="btn-shine"></div>
+            </button>
+          </div>
+          <div class="splash-anonymous-link">
+            <a href="#" @click.prevent="anonymousEnter">内测匿名访问</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- 低调管理入口 -->
+      <div class="splash-admin-entry" @click="goToPage('admin-login')">
+        ⚙️ 管理
+      </div>
+
+      <!-- 版权信息 -->
+      <div class="copyright">
+        © 2026 FDU Food
+        <span class="version-number">Version 1.3.0_beta</span>
+      </div>
+    </div>
+
+    <!-- ========== 管理员登录页面 ========== -->
+    <div class="auth-page page-view" v-if="currentPage === 'admin-login'">
+      <canvas ref="authAuroraCanvas" class="aurora-canvas"></canvas>
+      <div class="auth-page-card">
+        <div class="auth-page-header">
+          <button class="back-btn" @click="goToPage('splash')">← 返回</button>
+          <div class="auth-page-logo"> 旦食</div>
+          <p class="auth-page-subtitle">管理后台</p>
+        </div>
+        
+        <div class="auth-form-container">
+          <h2>管理员登录</h2>
+          <p class="auth-tip">请输入管理员密码</p>
+          <div class="form-group">
+            <label>密码</label>
+            <input 
+              type="password" 
+              v-model="adminPassword" 
+              placeholder="请输入管理员密码"
+              @keyup.enter="handleAdminLogin"
+            >
+          </div>
+          <p v-if="authError" class="auth-error">{{ authError }}</p>
+          <button class="submit-btn auth-submit-btn" @click="handleAdminLogin" :disabled="authSubmitting">
+            {{ authSubmitting ? '验证中...' : '登录' }}
+          </button>
+          <p class="auth-switch">
+            <a href="#" @click.prevent="goToPage('splash')">返回首页</a>
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== 管理员后台页面 ========== -->
+    <div class="admin-dashboard-page page-view" v-if="currentPage === 'admin-dashboard'">
+      <div class="admin-dashboard-header">
+        <h1> 旦食 管理后台</h1>
+        <button class="admin-logout-btn" @click="handleAdminLogout">退出管理</button>
+      </div>
+      
+      <div class="admin-tabs">
+        <button 
+          class="admin-tab" 
+          :class="{ active: adminTab === 'posts' }"
+          @click="switchAdminTab('posts')"
+        >内容管理</button>
+        <button 
+          class="admin-tab" 
+          :class="{ active: adminTab === 'users' }"
+          @click="switchAdminTab('users')"
+        >用户管理</button>
+      </div>
+      
+      <!-- 内容管理 -->
+      <div v-if="adminTab === 'posts'" class="admin-tab-panel">
+        <div class="admin-posts-list" v-if="adminPosts.length > 0">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>板块</th>
+                <th>食堂</th>
+                <th>档口</th>
+                <th>菜品</th>
+                <th>评分</th>
+                <th>发布者</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="post in adminPosts" :key="post.id" @click="viewPost(post)" style="cursor:pointer">
+                <td>{{ post.id }}</td>
+                <td><span class="source-tag">{{ post.source }}</span></td>
+                <td>{{ post.canteen }}</td>
+                <td>{{ post.stall }}</td>
+                <td>{{ post.dish || '-' }}</td>
+                <td>{{ post.rating }}星</td>
+                <td>{{ post.nickname || '-' }}</td>
+                <td @click.stop>
+                  <button class="table-delete-btn" @click="deleteReview(post.id)">删除</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-else class="admin-empty">
+          <p>暂无帖子数据</p>
+        </div>
+      </div>
+      
+      <!-- 用户管理 -->
+      <div v-if="adminTab === 'users'" class="admin-tab-panel">
+        <div class="admin-users-list" v-if="adminUsers.length > 0">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>昵称</th>
+                <th>邮箱</th>
+                <th>密码哈希</th>
+                <th>注册时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="user in adminUsers" :key="user.id">
+                <td>{{ user.id }}</td>
+                <td>{{ user.nickname }}</td>
+                <td>{{ user.email }}</td>
+                <td class="hash-cell">{{ user.password_hash.substring(0, 16) }}...</td>
+                <td>{{ formatTime(user.created_at) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-else class="admin-empty">
+          <p>暂无注册用户</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== 登录页面 ========== -->
+    <div class="auth-page page-view" v-if="currentPage === 'login'">
+      <canvas ref="authAuroraCanvas" class="aurora-canvas"></canvas>
+      <div class="auth-page-card">
+        <div class="auth-page-header">
+          <button class="back-btn" @click="goToPage('splash')">← 返回</button>
+          <div class="auth-page-logo">旦食</div>
+          <p class="auth-page-subtitle">复旦人的美食指南</p>
+        </div>
+        
+        <div class="auth-form-container">
+          <h2>登录</h2>
+          <p class="auth-tip">使用复旦邮箱和密码登录</p>
+          <div class="form-group">
+            <label>邮箱</label>
+            <input type="email" v-model="loginForm.email" placeholder="11位学号@m.fudan.edu.cn">
+          </div>
+          <div class="form-group">
+            <label>密码</label>
+            <input type="password" v-model="loginForm.password" placeholder="输入密码" @keyup.enter="handleLogin">
+          </div>
+          <p v-if="authError" class="auth-error">{{ authError }}</p>
+          <p v-if="authSuccess" class="auth-success">{{ authSuccess }}</p>
+          <button class="submit-btn auth-submit-btn" @click="handleLogin" :disabled="authSubmitting">
+            {{ authSubmitting ? '登录中...' : '登录' }}
+          </button>
+          <p class="auth-switch">还没有账号？<a href="#" @click.prevent="goToPage('register')">立即注册</a></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== 注册页面 ========== -->
+    <div class="auth-page page-view" v-if="currentPage === 'register'">
+      <canvas ref="authAuroraCanvas" class="aurora-canvas"></canvas>
+      <div class="auth-page-card">
+        <div class="auth-page-header">
+          <button class="back-btn" @click="goToPage('splash')">← 返回</button>
+          <div class="auth-page-logo">旦食</div>
+          <p class="auth-page-subtitle">复旦人的美食指南</p>
+        </div>
+        
+        <div class="auth-form-container">
+          <h2>注册</h2>
+          <p class="auth-tip">使用复旦邮箱完成注册</p>
+          <div class="form-group">
+            <label>复旦邮箱</label>
+            <input type="email" v-model="registerForm.email" placeholder="11位学号@m.fudan.edu.cn">
+          </div>
+          <div class="form-group code-group">
+            <label>验证码</label>
+            <div class="code-input-row">
+              <input type="text" v-model="registerForm.code" placeholder="6位验证码" maxlength="6">
+              <button class="send-code-btn" @click="sendVerificationCode" :disabled="codeSent || authSubmitting">
+                {{ codeSent ? '已发送' : '发送验证码' }}
+              </button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>设置密码</label>
+            <input type="password" v-model="registerForm.password" placeholder="至少6位">
+          </div>
+          <div class="form-group">
+            <label>确认密码</label>
+            <input type="password" v-model="registerForm.confirmPassword" placeholder="再次输入密码">
+          </div>
+          <div class="form-group">
+            <label>设置昵称</label>
+            <input type="text" v-model="registerForm.nickname" placeholder="注册后不可修改（最多20字）" maxlength="20">
+          </div>
+          <p v-if="authError" class="auth-error">{{ authError }}</p>
+          <p v-if="authSuccess" class="auth-success">{{ authSuccess }}</p>
+          <button class="submit-btn auth-submit-btn" @click="handleRegister" :disabled="authSubmitting">
+            {{ authSubmitting ? '注册中...' : '注册' }}
+          </button>
+          <p class="auth-switch">已有账号？<a href="#" @click.prevent="goToPage('login')">立即登录</a></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== 用户中心弹窗 ========== -->
+    <div class="modal-overlay user-profile" v-if="showUserProfile" @click.self="showUserProfile = false">
+      <div class="user-profile-content">
+        <div class="user-profile-header">
+          <div class="user-avatar">👤</div>
+          <h2>个人信息</h2>
+          <button class="close-btn" @click="showUserProfile = false">&times;</button>
+        </div>
+        <div class="user-profile-body">
+          <div class="profile-item">
+            <span class="profile-label">昵称</span>
+            <span class="profile-value">{{ nickname || '未设置' }}</span>
+          </div>
+          <div class="profile-item">
+            <span class="profile-label">邮箱</span>
+            <span class="profile-value">{{ currentUser?.email || '未登录' }}</span>
+          </div>
+        </div>
+        <div class="user-profile-footer">
+          <button class="logout-btn" @click="handleLogout">退出登录</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== 时段提示弹窗 ========== -->
+    <div class="modal-overlay time-notice" v-if="showTimeNotice" @click.self="closeTimeNotice">
+      <div class="time-notice-content">
+        <div class="time-notice-icon">🌙</div>
+        <h3>温馨提示</h3>
+        <p>当前非旦食黄金互动时段。建议在用餐高峰期后（如11-13点、17-19点）来分享你的真实美味体验。</p>
+        <p class="time-notice-sub">现在你仍可以浏览，但请保持社区安静。</p>
+        <button class="notice-btn" @click="closeTimeNotice">我知道了</button>
+      </div>
+    </div>
+
+    <!-- ========== 用前必看弹窗 ========== -->
+    <div class="modal-overlay onboarding" v-if="showOnboarding" @click.self="closeOnboarding">
+      <div class="onboarding-content">
+        <div class="onboarding-header">
+          <div class="onboarding-icon">📢</div>
+          <h2>用前必读</h2>
+        </div>
+        <div class="onboarding-body">
+          <div class="onboarding-section">
+            <h4>🔒 版权声明</h4>
+            <p>本项目（旦食）之 UI、代码及架构知识产权归开发者本人所有。严禁克隆、二次开发或用于商业目的。如有合作意向，请联系下方邮箱。</p>
+          </div>
+          <div class="onboarding-section">
+            <h4>⚠️ 内测守则</h4>
+            <p>当前为<strong>内测阶段</strong>，请勿对外公开网址或传播截图。旦食团队感谢你的理解与配合。</p>
+          </div>
+        </div>
+        <button class="agree-btn" @click="agreeAndEnter">我已知悉并同意遵守</button>
+      </div>
+    </div>
+
+    <!-- ========== 主应用内容 ========== -->
+    <template v-if="currentPage === 'main'">
+      <!-- 顶部导航 -->
+      <header class="header">
+        <div class="header-content">
+          <h1 class="logo">🍜 旦食</h1>
+          <p class="subtitle">复旦人的美食指南</p>
+          <div 
+            class="user-badge" 
+            v-if="nickname && nickname !== '匿名用户' && currentUser" 
+            @click="showUserProfile = true"
+          >
+            <span class="badge-icon">👤</span>
+            <span class="badge-name">{{ nickname }}</span>
+          </div>
+        </div>
+      </header>
+
+      <!-- 搜索栏 -->
+      <div class="search-section">
+        <div class="search-container">
+          <input 
+            type="text" 
+            class="search-input"
+            v-model="searchKeyword" 
+            placeholder="搜索菜品、档口或评价内容..." 
+            @keyup.enter="handleSearch"
+          >
+          <button class="search-btn" @click="handleSearch">🔍 搜索</button>
+        </div>
+      </div>
+
+      <!-- 模块切换 Tab -->
+      <div class="module-tabs">
+        <button 
+          class="tab-btn" 
+          :class="{ active: currentModule === 'canteen' }"
+          @click="switchModule('canteen')"
+        >食堂点评</button>
+        <button 
+          class="tab-btn" 
+          :class="{ active: currentModule === 'offcampus' }"
+          @click="switchModule('offcampus')"
+        >食客楼</button>
+      </div>
+
+      <!-- ========== 食堂点评模块 ========== -->
+      <template v-if="currentModule === 'canteen'">
+        <!-- 筛选区域 -->
+        <div class="filter-section">
+          <!-- 食堂单选 -->
+          <div class="filter-group">
+            <span class="filter-label">食堂筛选：</span>
+            <select v-model="filterCriteria.canteen" class="canteen-select">
+              <option value="">全部食堂</option>
+              <option v-for="c in allCanteens" :key="c" :value="c">{{ c }}</option>
+            </select>
+          </div>
+          
+          <!-- 价格区间 -->
+          <div class="filter-group price-filter-group">
+            <span class="filter-label">价格区间：</span>
+            <div class="price-inputs">
+              <input 
+                type="number" 
+                class="price-input" 
+                v-model="filterCriteria.priceMin" 
+                min="0" 
+                max="200" 
+                placeholder="最低"
+              >
+              <span class="price-dash">-</span>
+              <input 
+                type="number" 
+                class="price-input" 
+                v-model="filterCriteria.priceMax" 
+                min="0" 
+                max="200" 
+                placeholder="最高"
+              >
+              <span class="price-unit">元</span>
+              <button class="apply-filter-btn" @click="applyFilters">确定筛选</button>
+            </div>
+            <span class="price-text">{{ filterCriteria.priceMin || 0 }}元 - {{ (filterCriteria.priceMax || 200) === 200 ? '200元+' : filterCriteria.priceMax + '元' }}</span>
+          </div>
+
+          <!-- 排序 -->
+          <div class="filter-group">
+            <select v-model="sortBy" @change="applyFilters" class="sort-select">
+              <option value="latest">最新发布</option>
+              <option value="popular">最热评价</option>
+              <option value="rating">评分最高</option>
+            </select>
+          </div>
+
+          <!-- 重置按钮 -->
+          <button v-if="hasFilters" class="reset-btn" @click="resetFilters">
+            🔄 重置
+          </button>
+        </div>
+
+        <!-- 筛选结果显示 -->
+        <div class="results-info">
+          共找到 <strong>{{ filteredReviews.length }}</strong> 条评价
+          <span v-if="searchKeyword">，关键词："{{ searchKeyword }}"</span>
+        </div>
+
+        <!-- 评价卡片列表 -->
+        <main class="main-content">
+          <div class="reviews-container">
+            <div 
+              v-for="review in paginatedReviews" 
+              :key="review.id" 
+              class="review-card"
+              :class="getCardClass(review)"
+            >
+              <!-- 卡片右上角：价格和评分 -->
+              <div class="card-right">
+                <div class="card-price" v-if="review.price">
+                  💰 {{ review.price }}
+                </div>
+                <div class="card-rating">
+                  <span v-for="n in 6" :key="n" class="star" :class="getStarClass(n, review.rating)">
+                    {{ n <= review.rating ? (n === 6 ? '👑' : '★') : '☆' }}
+                  </span>
+                </div>
+                <div class="rating-label" :class="getRatingLabelClass(review.rating)">
+                  {{ getRatingLabel(review.rating) }}
+                </div>
+              </div>
+
+              <!-- 卡片左侧：主要信息 -->
+              <div class="card-left">
+                <div class="card-header">
+                  <span class="canteen-tag">{{ review.canteen }}</span>
+                  <span class="stall-name">{{ review.stall }}</span>
+                  <span v-if="review.nickname" class="nickname">{{ review.nickname }}</span>
+                  <span class="time">{{ formatTime(review.created_at) }}</span>
+                </div>
+                
+                <h3 class="dish-name" v-if="review.dish">{{ review.dish }}</h3>
+                
+                <p class="review-content">{{ review.content }}</p>
+              </div>
+
+              <!-- 底部：投票和操作 -->
+              <div class="card-footer">
+                <div class="vote-buttons">
+                  <button 
+                    class="vote-btn recommend" 
+                    :class="{ voted: userVotes[review.id] === 'up' }"
+                    @click="handleVote(review.id, 'up')"
+                  >
+                    <span class="vote-icon">👍</span>
+                    <span class="vote-count">{{ review.upvotes }}</span>
+                    <span class="vote-label" v-if="userVotes[review.id] === 'up'">已推荐</span>
+                  </button>
+                  <button 
+                    class="vote-btn oppose" 
+                    :class="{ voted: userVotes[review.id] === 'down' }"
+                    @click="handleVote(review.id, 'down')"
+                  >
+                    <span class="vote-icon">👎</span>
+                    <span class="vote-count">{{ review.downvotes }}</span>
+                    <span class="vote-label" v-if="userVotes[review.id] === 'down'">已避雷</span>
+                  </button>
+                </div>
+                
+                <div class="admin-actions" v-if="isAdmin">
+                  <button class="delete-btn" @click="deleteReview(review.id)">🗑️ 删除</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 分页 -->
+          <div class="pagination" v-if="totalPages > 1">
+            <button 
+              class="page-btn" 
+              :disabled="paginationPage === 1" 
+              @click="goToPage(paginationPage - 1)"
+            >上一页</button>
+            <span class="page-info">{{ paginationPage }} / {{ totalPages }}</span>
+            <button 
+              class="page-btn" 
+              :disabled="paginationPage === totalPages" 
+              @click="goToPage(paginationPage + 1)"
+            >下一页</button>
+          </div>
+
+          <!-- 加载状态 -->
+          <div v-if="loading" class="loading">
+            <div class="spinner"></div>
+            <p>加载中...</p>
+          </div>
+
+          <!-- 空状态 -->
+          <div v-if="!loading && filteredReviews.length === 0" class="empty-state">
+            <p class="empty-icon">🍽️</p>
+            <h3>{{ hasActivePriceFilter ? '当前价格区间没有找到美食' : '暂无评价' }}</h3>
+            <p>{{ hasActivePriceFilter ? '换个范围试试？' : '还没有人写下第一条评价，快来成为第一个吧！' }}</p>
+          </div>
+        </main>
+      </template>
+
+      <!-- ========== 食客楼模块 ========== -->
+      <template v-if="currentModule === 'offcampus'">
+        <!-- 筛选结果显示 -->
+        <div class="results-info">
+          食客楼 · 共 <strong>{{ offcampusReviews.length }}</strong> 条美食杂谈
+        </div>
+
+        <!-- 食客楼评价列表 -->
+        <main class="main-content">
+          <div class="reviews-container">
+            <div 
+              v-for="review in paginatedOffcampusReviews" 
+              :key="review.id" 
+              class="review-card offcampus-card"
+              :class="getCardClass(review)"
+            >
+              <div class="card-left">
+                <div class="card-header">
+                  <span v-if="review.nickname" class="nickname">{{ review.nickname }}</span>
+                  <span class="time">{{ formatTime(review.created_at) }}</span>
+                </div>
+                
+                <h3 class="dish-name" v-if="review.dish">{{ review.dish }}</h3>
+                
+                <p class="review-content">{{ review.content }}</p>
+              </div>
+
+              <div class="card-right">
+                <div class="card-rating">
+                  <span v-for="n in 6" :key="n" class="star" :class="getStarClass(n, review.rating)">
+                    {{ n <= review.rating ? (n === 6 ? '👑' : '★') : '☆' }}
+                  </span>
+                </div>
+              </div>
+
+              <div class="card-footer">
+                <div class="vote-buttons">
+                  <button 
+                    class="vote-btn recommend" 
+                    :class="{ voted: userVotes[review.id] === 'up' }"
+                    @click="handleVote(review.id, 'up')"
+                  >
+                    <span class="vote-icon">👍</span>
+                    <span class="vote-count">{{ review.upvotes }}</span>
+                  </button>
+                  <button 
+                    class="vote-btn oppose" 
+                    :class="{ voted: userVotes[review.id] === 'down' }"
+                    @click="handleVote(review.id, 'down')"
+                  >
+                    <span class="vote-icon">👎</span>
+                    <span class="vote-count">{{ review.downvotes }}</span>
+                  </button>
+                </div>
+                
+                <div class="admin-actions" v-if="isAdmin">
+                  <button class="delete-btn" @click="deleteReview(review.id)">🗑️ 删除</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 分页 -->
+          <div class="pagination" v-if="offcampusTotalPages > 1">
+            <button 
+              class="page-btn" 
+              :disabled="offcampusPage === 1" 
+              @click="offcampusPage--; scrollTop()"
+            >上一页</button>
+            <span class="page-info">{{ offcampusPage }} / {{ offcampusTotalPages }}</span>
+            <button 
+              class="page-btn" 
+              :disabled="offcampusPage === offcampusTotalPages" 
+              @click="offcampusPage++; scrollTop()"
+            >下一页</button>
+          </div>
+
+          <!-- 加载状态 -->
+          <div v-if="loading" class="loading">
+            <div class="spinner"></div>
+            <p>加载中...</p>
+          </div>
+
+          <!-- 空状态 -->
+          <div v-if="!loading && offcampusReviews.length === 0" class="empty-state">
+            <p class="empty-icon">🏠</p>
+            <h3>食客楼空空如也</h3>
+            <p>快来分享你的校外觅食心得吧！</p>
+          </div>
+        </main>
+      </template>
+
+      <!-- 写点评按钮 -->
+      <button class="fab" @click="showForm = true">+</button>
+
+      <!-- 点评表单弹窗 -->
+      <div class="modal-overlay" v-if="showForm" @click.self="closeForm">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2>写点评</h2>
+            <button class="close-btn" @click="closeForm">×</button>
+          </div>
+          
+          <form @submit.prevent="submitReview" class="review-form">
+            <!-- 食堂点评表单 -->
+            <template v-if="currentModule === 'canteen'">
+              <div class="form-group">
+                <label>选择食堂 <span class="required">*</span></label>
+                <select v-model="formData.canteen" @change="onCanteenChange" required>
+                  <option value="">请选择食堂</option>
+                  <option v-for="c in allCanteens" :key="c" :value="c">{{ c }}</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label>选择档口 <span class="required">*</span></label>
+                <select v-model="formData.stall" :disabled="!formData.canteen" required>
+                  <option value="">请先选择食堂</option>
+                  <option v-for="s in availableStalls" :key="s" :value="s">{{ s }}</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label>推荐菜品</label>
+                <input type="text" v-model="formData.dish" placeholder="输入菜品名称（选填）">
+              </div>
+
+              <div class="form-group">
+                <label>人均价格（元）</label>
+                <input type="number" v-model="formData.price" placeholder="例如：25" min="0">
+              </div>
+            </template>
+
+            <!-- 食客楼表单 -->
+            <template v-if="currentModule === 'offcampus'">
+              <div class="form-group">
+                <label>美食名称/话题</label>
+                <input type="text" v-model="formData.dish" placeholder="分享的美食或话题（选填）">
+              </div>
+            </template>
+
+            <div class="form-group">
+              <label>评分 <span class="required">*</span></label>
+              <div class="rating-selector">
+                <span 
+                  v-for="n in 6" 
+                  :key="n" 
+                  class="rating-star" 
+                  :class="{ active: n <= formData.rating, top: n === 6 }"
+                  @click="formData.rating = n"
+                >
+                  {{ n <= formData.rating ? (n === 6 ? '👑' : '★') : '☆' }}
+                </span>
+                <span class="rating-hint" v-if="formData.rating === 6">👑 复旦顶流！</span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>评价内容 <span class="required">*</span></label>
+              <textarea 
+                v-model="formData.content" 
+                placeholder="分享你的用餐体验..." 
+                maxlength="500"
+                required
+              ></textarea>
+              <span class="char-count">{{ formData.content.length }} / 500</span>
+            </div>
+
+            <div class="form-group">
+              <label>昵称</label>
+              <input type="text" v-model="formData.nickname" placeholder="你的昵称（选填）">
+            </div>
+
+            <div class="form-actions">
+              <button type="button" class="cancel-btn" @click="closeForm">取消</button>
+              <button type="submit" class="submit-btn" :disabled="submitting">
+                {{ submitting ? '发布中...' : '发布点评' }}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- 管理员弹窗 -->
+      <div class="modal-overlay" v-if="showAdminModal" @click.self="showAdminModal = false">
+        <div class="modal-content admin-modal">
+          <div class="modal-header">
+            <h2>{{ isAdmin ? '管理后台' : '管理员登录' }}</h2>
+            <button class="close-btn" @click="showAdminModal = false">×</button>
+          </div>
+          
+          <!-- 未登录状态 -->
+          <form v-if="!isAdmin" @submit.prevent="handleAdminLogin" class="admin-form">
+            <input 
+              type="password" 
+              v-model="adminPassword" 
+              placeholder="请输入管理员密码"
+            >
+            <button type="submit" class="submit-btn">登录</button>
+          </form>
+          
+          <!-- 已登录状态 -->
+          <div v-else class="admin-dashboard">
+            <div class="admin-tabs">
+              <button 
+                class="admin-tab" 
+                :class="{ active: adminTab === 'posts' }"
+                @click="adminTab = 'posts'"
+              >帖子管理</button>
+              <button 
+                class="admin-tab" 
+                :class="{ active: adminTab === 'users' }"
+                @click="switchAdminTab('users')"
+              >用户管理</button>
+            </div>
+            
+            <!-- 帖子管理 -->
+            <div v-if="adminTab === 'posts'" class="admin-tab-content">
+              <p class="admin-tip">当前已登录为管理员身份，可查看所有帖子详情或进行删除操作。</p>
+              <button class="admin-logout-btn" @click="handleAdminLogout">退出管理</button>
+            </div>
+            
+            <!-- 用户管理 -->
+            <div v-if="adminTab === 'users'" class="admin-tab-content">
+              <div class="user-list" v-if="adminUsers.length > 0">
+                <div class="user-item" v-for="user in adminUsers" :key="user.id">
+                  <div class="user-info">
+                    <span class="user-nickname">{{ user.nickname }}</span>
+                    <span class="user-email">{{ user.email }}</span>
+                  </div>
+                  <span class="user-date">{{ formatTime(user.created_at) }}</span>
+                </div>
+              </div>
+              <div v-else class="user-list-empty">
+                <p>暂无注册用户</p>
+              </div>
+              <button class="admin-logout-btn" @click="handleAdminLogout">退出管理</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ========== 页脚 ========== -->
+      <footer class="footer">
+        <div class="footer-content">
+          <div class="footer-links">
+            <span class="footer-link" @click="showAboutMe = true">关于我</span>
+            <span class="footer-divider">·</span>
+            <span class="footer-link" @click="showAboutDanShi = true">关于旦食</span>
+            <span class="footer-divider">·</span>
+            <span class="footer-link" @click="showUserNotice = true">用户须知</span>
+          </div>
+          <div class="admin-entry-small" @click="showAdminModal = true">管理</div>
+        </div>
+        <div class="footer-notice">
+          本项目内测中，请勿对外传播网址或截图。旦食团队感谢理解。
+        </div>
+      </footer>
+
+      <!-- 关于我弹窗 -->
+      <div class="modal-overlay" v-if="showAboutMe" @click.self="showAboutMe = false">
+        <div class="about-modal">
+          <div class="modal-header">
+            <h2>关于我</h2>
+            <button class="close-btn" @click="showAboutMe = false">×</button>
+          </div>
+          <div class="about-content">
+            <div class="about-section">
+              <p class="about-name">Ivanfourth</p>
+              <p class="about-school">复旦大学 2025 级</p>
+            </div>
+            <div class="about-section">
+              <h4>联系方式</h4>
+              <p class="about-email">ivanfourth@163.com</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 关于旦食弹窗 -->
+      <div class="modal-overlay" v-if="showAboutDanShi" @click.self="showAboutDanShi = false">
+        <div class="about-modal about-danshi">
+          <div class="modal-header">
+            <h2>关于旦食</h2>
+            <button class="close-btn" @click="showAboutDanShi = false">×</button>
+          </div>
+          <div class="about-content">
+            <div class="danshi-intro">
+              <p>"旦食"是一个诞生于复旦校内的独立点评项目。我们不追求商业化的宏大，只在乎每一个档口最真实的烟火气。</p>
+              <br>
+              <p>在这里，没有虚假的商业滤镜，只有复旦同学之间最真诚的"推荐"与"避雷"。我们通过数据规范化与去中心化的评价，致力于让每一份校内膳食都透明可寻。</p>
+              <br>
+              <p>我们相信，好的食物值得被看见，而差的体验不应被重复。旦愿每一位复旦人，都能在"旦食"找到属于自己的那一口惊喜。</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== 帖子详情弹窗（始终在 app 根层级，不受 template 约束） ========== -->
+    <div class="modal-overlay" v-if="showPostDetail && viewingPost" @click.self="closePostDetail">
+      <div class="modal-content post-detail-modal">
+        <div class="modal-header">
+          <h2>帖子详情</h2>
+          <button class="close-btn" @click="closePostDetail">×</button>
+        </div>
+        <div class="post-detail-body" v-if="viewingPost">
+          <div class="detail-row">
+            <span class="detail-label">ID</span>
+            <span class="detail-value">{{ viewingPost.id }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">食堂</span>
+            <span class="detail-value">{{ viewingPost.canteen }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">档口</span>
+            <span class="detail-value">{{ viewingPost.stall }}</span>
+          </div>
+          <div class="detail-row" v-if="viewingPost.dish">
+            <span class="detail-label">菜品</span>
+            <span class="detail-value">{{ viewingPost.dish }}</span>
+          </div>
+          <div class="detail-row" v-if="viewingPost.price">
+            <span class="detail-label">价格</span>
+            <span class="detail-value">{{ viewingPost.price }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">评分</span>
+            <span class="detail-value">
+              <span v-for="n in 6" :key="n" class="star" :class="getStarClass(n, viewingPost.rating)">
+                {{ n <= viewingPost.rating ? (n === 6 ? '👑' : '★') : '☆' }}
+              </span>
+            </span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">发布者</span>
+            <span class="detail-value">{{ viewingPost.nickname || '匿名' }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">发布时间</span>
+            <span class="detail-value">{{ viewingPost.created_at }}</span>
+          </div>
+          <div class="detail-row detail-content-row">
+            <span class="detail-label">评价内容</span>
+            <div class="detail-content">{{ viewingPost.content }}</div>
+          </div>
+          <div class="detail-actions">
+            <button class="table-delete-btn" @click="deleteReview(viewingPost.id); closePostDetail()">删除</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+</template>
+
+      <!-- ========== 全局弹窗层 - 始终在最顶层 ========== -->
+      <!-- 用户须知弹窗 -->
+      <div class="modal-overlay global-modal" v-if="showUserNotice" @click.self="showUserNotice = false">
+        <div class="about-modal about-danshi">
+          <div class="modal-header">
+            <h2>用户须知</h2>
+            <button class="close-btn" @click="showUserNotice = false">×</button>
+          </div>
+          <div class="about-content">
+            <div class="onboarding-section">
+              <h4>🔒 版权声明</h4>
+              <p>本项目（旦食）之 UI、代码及架构知识产权归开发者本人所有。严禁克隆、二次开发或用于商业目的。如有合作意向，请联系下方邮箱。</p>
+            </div>
+            <div class="onboarding-section">
+              <h4>⚠️ 内测守则</h4>
+              <p>当前为<strong>内测阶段</strong>，请勿对外公开网址或传播截图。旦食团队感谢你的理解与配合。</p>
+            </div>
+            <div style="text-align: center; margin-top: 20px;">
+              <p style="color: #87CEEB; font-size: 0.95rem;">📧 合作联系：ivanfourth@163.com</p>
+            </div>
+          </div>
+        </div>
+      </div>
+  </div>
+
+  <script src="config.js?v=1.5.4"></script>
+  <script src="js/app.js?v=1.5.4"></script>
+</body>
+</html>

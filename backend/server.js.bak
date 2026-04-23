@@ -1,0 +1,341 @@
+const express = require('express');
+const cors = require('cors');
+const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
+
+try {
+  const dotenv = require('dotenv');
+  const envPath = path.join(__dirname, '..', '.env');
+  if (fs.existsSync(envPath)) {
+    dotenv.config({ path: envPath });
+    console.log('✓ 环境变量已加载');
+  }
+} catch (e) {
+  console.log('dotenv not available');
+}
+
+const SMTP_CONFIG = {
+  host: process.env.SMTP_HOST || '',
+  port: parseInt(process.env.SMTP_PORT) || 465,
+  user: process.env.SMTP_USER || '',
+  pass: process.env.SMTP_PASS || '',
+  fromName: process.env.SMTP_FROM_NAME || '旦食 FDU Food',
+  subjectPrefix: process.env.SMTP_SUBJECT_PREFIX || '【旦食】'
+};
+
+const { db, initDatabase, getReviews, getCanteens, getStalls, addReview, voteReview, deleteReview, verifyAdmin, stallsData, getAllPosts, getOffcampusReviews, validateFudanEmail, generateCode, saveVerificationCode, verifyCode, isNicknameTaken, createUser, verifyUser, getUserByEmail, updateUserPassword, getAllUsers } = require('./database');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+function hashPassword(password) {
+  return crypto.createHash('sha256').update(password + 'danshi_salt_2026').digest('hex');
+}
+
+initDatabase();
+
+app.use(cors());
+app.use(express.json());
+app.use(express.static(path.join(__dirname, '..', 'frontend')));
+
+function parseSMTPError(error) {
+  const errorCode = error.code || '';
+  const errorMessage = error.message || '';
+  const responseCode = error.responseCode || 0;
+  
+  const errorMappings = {
+    'ECONNREFUSED': { userMessage: '无法连接到邮件服务器', isRetryable: false },
+    'ETIMEDOUT': { userMessage: '邮件服务器连接超时', isRetryable: true },
+    'ESOCKET': { userMessage: '邮件服务器连接异常', isRetryable: true },
+    'EAUTH': { userMessage: '邮件服务认证失败', isRetryable: false },
+    'EENVELOPE': { userMessage: '邮件地址格式错误', isRetryable: false }
+  };
+  
+  if (responseCode === 554) return { code: '554_SPAM', userMessage: '邮件被拦截，请1分钟后重试', isRetryable: true };
+  if (responseCode === 552) return { code: '552_QUOTA', userMessage: '邮件发送量超限', isRetryable: true };
+  if (responseCode === 421) return { code: '421_TEMP', userMessage: '服务器繁忙', isRetryable: true };
+  if (responseCode === 450 || responseCode === 451) return { code: '450_RATE', userMessage: '操作过快，请1分钟后再试', isRetryable: true };
+  if (responseCode === 535) return { code: '535_AUTH', userMessage: '邮件认证失败', isRetryable: false };
+  
+  for (const [code, info] of Object.entries(errorMappings)) {
+    if (errorCode.includes(code) || errorMessage.includes(code)) {
+      return { code, ...info, originalMessage: errorMessage };
+    }
+  }
+  
+  return { code: 'UNKNOWN', userMessage: '邮件发送失败', isRetryable: true, detail: errorMessage };
+}
+
+async function sendVerificationEmail(to, code, maxRetries = 3) {
+  if (!SMTP_CONFIG.host || !SMTP_CONFIG.user || !SMTP_CONFIG.pass) {
+    const err = new Error('SMTP配置不完整');
+    err.code = 'CONFIG_MISSING';
+    throw err;
+  }
+
+  const nodemailer = require('nodemailer');
+  
+  const transporter = nodemailer.createTransport({
+    host: SMTP_CONFIG.host,
+    port: SMTP_CONFIG.port,
+    secure: SMTP_CONFIG.port === 465,
+    auth: { user: SMTP_CONFIG.user, pass: SMTP_CONFIG.pass },
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 15000
+  });
+
+  const mailOptions = {
+    from: `"${SMTP_CONFIG.fromName}" <${SMTP_CONFIG.user}>`,
+    to: to,
+    subject: `${SMTP_CONFIG.subjectPrefix} 您的注册验证码`,
+    html: `
+      <div style="font-family: 'Helvetica Neue', Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px; background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border-radius: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.1);">
+        <div style="text-align: center; margin-bottom: 32px;">
+          <h1 style="color: #78350f; font-size: 28px; margin: 0; font-weight: 600;">🍜 旦食</h1>
+          <p style="color: #92400e; margin: 8px 0 0; font-size: 14px;">复旦人的美食指南</p>
+        </div>
+        <div style="background: white; border-radius: 12px; padding: 32px; text-align: center; box-shadow: 0 4px 20px rgba(0,0,0,0.05);">
+          <p style="color: #1e293b; font-size: 16px; margin: 0 0 24px;">您的注册验证码是：</p>
+          <div style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; font-size: 36px; font-weight: 700; padding: 20px 48px; border-radius: 12px; letter-spacing: 8px; display: inline-block; box-shadow: 0 4px 15px rgba(245, 158, 11, 0.4);">${code}</div>
+          <p style="color: #64748b; font-size: 13px; margin: 24px 0 0;">验证码有效期为 <strong>10 分钟</strong>，请尽快完成验证。</p>
+        </div>
+        <p style="color: #92400e; font-size: 12px; text-align: center; margin-top: 24px;">如非本人操作，请忽略此邮件。<br>© 2026 旦食 FDU Food</p>
+      </div>
+    `,
+    text: `旦食 - 您的注册验证码是：${code}，有效期10分钟。`
+  };
+
+  let lastError = null;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const info = await transporter.sendMail(mailOptions);
+      console.log(`[SMTP] 邮件发送成功至 ${to}`);
+      return true;
+    } catch (error) {
+      lastError = error;
+      const parsed = parseSMTPError(error);
+      if (!parsed.isRetryable) break;
+      if (attempt < maxRetries) {
+        await new Promise(resolve => setTimeout(resolve, attempt * 2000));
+      }
+    }
+  }
+  
+  const parsedError = parseSMTPError(lastError);
+  const finalError = new Error(parsedError.userMessage);
+  finalError.code = parsedError.code;
+  throw finalError;
+}
+
+app.get('/api/reviews', (req, res) => {
+  try {
+    const { canteen, canteens, stall, minRating, sort, limit, search, minPrice, maxPrice } = req.query;
+    const filters = {};
+    filters.excludeOffcampus = true;
+    if (search) filters.search = search;
+    if (canteens) filters.canteens = canteens.split(',');
+    else if (canteen && canteen !== '全部') filters.canteen = canteen;
+    if (stall) filters.stall = stall;
+    if (minRating) filters.minRating = parseInt(minRating);
+    if (sort) filters.sort = sort;
+    if (limit) filters.limit = parseInt(limit);
+    if (minPrice) filters.minPrice = parseFloat(minPrice);
+    if (maxPrice) filters.maxPrice = parseFloat(maxPrice);
+    const reviews = getReviews(filters);
+    res.json({ success: true, data: reviews });
+  } catch (error) {
+    res.status(500).json({ success: false, message: '服务器错误' });
+  }
+});
+
+app.get('/api/reviews/offcampus', (req, res) => {
+  try {
+    const { sort } = req.query;
+    const filters = { canteen: '食客楼', sort: sort || 'latest' };
+    const reviews = getReviews(filters);
+    res.json({ success: true, data: reviews });
+  } catch (error) {
+    res.status(500).json({ success: false, message: '服务器错误' });
+  }
+});
+
+app.get('/api/admin/all-posts', (req, res) => {
+  try {
+    const { password } = req.query;
+    if (!verifyAdmin(password)) return res.status(401).json({ success: false, message: '未授权' });
+    const canteenPosts = db.prepare(`SELECT r.*, u.nickname, '校内食堂' as source FROM reviews r LEFT JOIN users u ON r.user_id = u.id WHERE r.canteen != '食客楼'`).all();
+    const offcampusPosts = db.prepare(`SELECT r.*, u.nickname, '食客楼' as source FROM reviews r LEFT JOIN users u ON r.user_id = u.id WHERE r.canteen = '食客楼'`).all();
+    const allPosts = [...canteenPosts, ...offcampusPosts].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    res.json({ success: true, data: allPosts });
+  } catch (error) {
+    res.status(500).json({ success: false, message: '服务器错误' });
+  }
+});
+
+app.get('/api/canteens', (req, res) => {
+  try {
+    res.json({ success: true, data: getCanteens() });
+  } catch (error) {
+    res.status(500).json({ success: false, message: '服务器错误' });
+  }
+});
+
+app.get('/api/stalls', (req, res) => {
+  try {
+    const { canteen } = req.query;
+    res.json({ success: true, data: getStalls(canteen) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: '服务器错误' });
+  }
+});
+
+app.get('/api/stalls/all', (req, res) => {
+  try {
+    res.json({ success: true, data: stallsData });
+  } catch (error) {
+    res.status(500).json({ success: false, message: '服务器错误' });
+  }
+});
+
+app.post('/api/reviews', (req, res) => {
+  try {
+    const { canteen, stall, dish, price, rating, content, nickname, isOffcampus } = req.body;
+    if (!isOffcampus) {
+      if (!canteen || !stall || !rating || !content) return res.status(400).json({ success: false, message: '请填写必填字段' });
+      const validStalls = getStalls(canteen);
+      if (canteen && validStalls && !validStalls.includes(stall)) return res.status(400).json({ success: false, message: '请选择预设的档口' });
+    } else {
+      if (!rating || !content) return res.status(400).json({ success: false, message: '请填写评分和评价内容' });
+    }
+    if (rating < 1 || rating > 6) return res.status(400).json({ success: false, message: '评分必须在1-6之间' });
+    if (content.length > 500) return res.status(400).json({ success: false, message: '评价内容不能超过500字' });
+    const newReview = addReview({ canteen, stall, dish, price, rating, content, nickname });
+    res.json({ success: true, data: newReview });
+  } catch (error) {
+    res.status(500).json({ success: false, message: '服务器错误' });
+  }
+});
+
+app.post('/api/reviews/:id/vote', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { voteType, previousVote } = req.body;
+    if (voteType === 'cancel' && previousVote) {
+      const updated = voteReview(parseInt(id), 'cancel', previousVote);
+      return updated ? res.json({ success: true, data: updated, action: 'cancelled' }) : res.status(404).json({ success: false });
+    }
+    if (!['up', 'down'].includes(voteType)) return res.status(400).json({ success: false, message: '无效的投票类型' });
+    const updated = voteReview(parseInt(id), voteType, previousVote);
+    if (!updated) return res.status(404).json({ success: false, message: '评价不存在' });
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    res.status(500).json({ success: false, message: '服务器错误' });
+  }
+});
+
+app.post('/api/admin/login', (req, res) => {
+  try {
+    const { password } = req.body;
+    if (verifyAdmin(password)) res.json({ success: true, isAdmin: true });
+    else res.status(401).json({ success: false, message: '密码错误' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: '服务器错误' });
+  }
+});
+
+app.get('/api/admin/users', (req, res) => {
+  try {
+    const { password } = req.query;
+    if (!verifyAdmin(password)) return res.status(401).json({ success: false, message: '未授权' });
+    res.json({ success: true, data: getAllUsers() });
+  } catch (error) {
+    res.status(500).json({ success: false, message: '服务器错误' });
+  }
+});
+
+app.delete('/api/reviews/:id', (req, res) => {
+  try {
+    const { password } = req.query;
+    if (!verifyAdmin(password)) return res.status(401).json({ success: false, message: '未授权' });
+    const { id } = req.params;
+    deleteReview(parseInt(id));
+    res.json({ success: true, message: '评价已删除' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: '服务器错误' });
+  }
+});
+
+app.post('/api/auth/send-code', async (req, res) => {
+  try {
+    const { email } = req.body;
+    const validation = validateFudanEmail(email);
+    if (!validation.valid) return res.status(400).json({ success: false, message: '请使用复旦邮箱格式' });
+    const code = generateCode();
+    saveVerificationCode(email, code);
+    try {
+      await sendVerificationEmail(email, code);
+      res.json({ success: true, message: '验证码已发送至您的复旦邮箱' });
+    } catch (smtpError) {
+      res.status(500).json({ success: false, code: smtpError.code, message: smtpError.message });
+    }
+  } catch (error) {
+    res.status(500).json({ success: false, message: '服务器错误' });
+  }
+});
+
+app.post('/api/auth/register', (req, res) => {
+  try {
+    const { email, code, password, confirmPassword, nickname } = req.body;
+    const validation = validateFudanEmail(email);
+    if (!validation.valid) return res.status(400).json({ success: false, message: '请使用复旦邮箱格式' });
+    if (!verifyCode(email, code)) return res.status(400).json({ success: false, message: '验证码错误或已过期' });
+    if (!password || password.length < 6) return res.status(400).json({ success: false, message: '密码至少需要6位' });
+    if (password !== confirmPassword) return res.status(400).json({ success: false, message: '两次密码输入不一致' });
+    if (!nickname || nickname.trim().length === 0 || nickname.length > 20) return res.status(400).json({ success: false, message: '请输入1-20位的昵称' });
+    if (isNicknameTaken(nickname.trim())) return res.status(400).json({ success: false, message: '该昵称已被使用' });
+    const passwordHash = hashPassword(password);
+    const result = createUser(email, passwordHash, nickname.trim());
+    if (!result.success) return res.status(500).json({ success: false, message: '注册失败' });
+    res.json({ success: true, message: '注册成功', user: { email, nickname: nickname.trim() } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: '服务器错误' });
+  }
+});
+
+app.post('/api/auth/login', (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ success: false, message: '请输入邮箱和密码' });
+    const passwordHash = hashPassword(password);
+    const user = verifyUser(email, passwordHash);
+    if (!user) return res.status(401).json({ success: false, message: '邮箱或密码错误' });
+    res.json({ success: true, message: '登录成功', user: { id: user.id, email: user.email, nickname: user.nickname, createdAt: user.created_at } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: '服务器错误' });
+  }
+});
+
+app.get('/api/auth/me', (req, res) => {
+  try {
+    const { email } = req.query;
+    if (!email) return res.status(400).json({ success: false, message: '缺少邮箱参数' });
+    const user = getUserByEmail(email);
+    if (!user) return res.status(404).json({ success: false, message: '用户不存在' });
+    res.json({ success: true, user: { id: user.id, email: user.email, nickname: user.nickname, createdAt: user.created_at } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: '服务器错误' });
+  }
+});
+
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'frontend', 'index.html'));
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`\n🍜 旦食服务器已启动!`);
+  console.log(`📍 访问地址: http://localhost:${PORT}`);
+  console.log(`🔐 管理员密码: ${process.env.ADMIN_PASSWORD || '未设置'}\n`);
+});
