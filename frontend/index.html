@@ -36,7 +36,7 @@
       <!-- 玻璃拟态中心交互区 -->
       <div class="glass-card">
         <div class="glass-card-inner">
-          <div class="splash-logo">旦食哈哈哈</div>
+          <div class="splash-logo">旦食</div>
           <p class="splash-tagline">复旦人的美食指南</p>
           <div class="splash-auth-buttons">
             <button class="glass-btn auth-btn" @click="goToPage('login')">
@@ -475,7 +475,7 @@
                     @click="handleVote(review.id, 'up')"
                   >
                     <span class="vote-icon">👍</span>
-                    <span class="vote-count">{{ review.upvotes }}</span>
+                    <span class="vote-count">{{ Math.max(0, review.upvotes) }}</span>
                     <span class="vote-label" v-if="userVotes[review.id] === 'up'">已推荐</span>
                   </button>
                   <button 
@@ -484,7 +484,7 @@
                     @click="handleVote(review.id, 'down')"
                   >
                     <span class="vote-icon">👎</span>
-                    <span class="vote-count">{{ review.downvotes }}</span>
+                    <span class="vote-count">{{ Math.max(0, review.downvotes) }}</span>
                     <span class="vote-label" v-if="userVotes[review.id] === 'down'">已避雷</span>
                   </button>
                 </div>
@@ -569,7 +569,7 @@
                     @click="handleVote(review.id, 'up')"
                   >
                     <span class="vote-icon">👍</span>
-                    <span class="vote-count">{{ review.upvotes }}</span>
+                    <span class="vote-count">{{ Math.max(0, review.upvotes) }}</span>
                   </button>
                   <button 
                     class="vote-btn oppose" 
@@ -577,7 +577,7 @@
                     @click="handleVote(review.id, 'down')"
                   >
                     <span class="vote-icon">👎</span>
-                    <span class="vote-count">{{ review.downvotes }}</span>
+                    <span class="vote-count">{{ Math.max(0, review.downvotes) }}</span>
                   </button>
                 </div>
                 
