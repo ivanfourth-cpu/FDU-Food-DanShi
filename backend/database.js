@@ -230,8 +230,25 @@ function voteReview(id, voteType, previousVote) {
   }
 
   if (upvoteDelta !== 0 || downvoteDelta !== 0) {
-    db.prepare('UPDATE reviews SET upvotes = upvotes + ?, downvotes = downvotes + ? WHERE id = ?')
-      .run(upvoteDelta, downvoteDelta, id);
+    // 使用 CASE WHEN 确保计数不会变成负数
+    let sql = 'UPDATE reviews SET ';
+    const params = [];
+    
+    if (upvoteDelta !== 0) {
+      sql += 'upvotes = CASE WHEN upvotes > 0 THEN upvotes + ? ELSE 0 END';
+      params.push(upvoteDelta);
+    }
+    
+    if (downvoteDelta !== 0) {
+      if (upvoteDelta !== 0) sql += ', ';
+      sql += 'downvotes = CASE WHEN downvotes > 0 THEN downvotes + ? ELSE 0 END';
+      params.push(downvoteDelta);
+    }
+    
+    sql += ' WHERE id = ?';
+    params.push(id);
+    
+    db.prepare(sql).run(...params);
   }
 
   return db.prepare('SELECT * FROM reviews WHERE id = ?').get(id);
