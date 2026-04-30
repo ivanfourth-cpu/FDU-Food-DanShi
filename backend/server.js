@@ -27,7 +27,7 @@ const SMTP_CONFIG = {
 const { db, initDatabase, getReviews, getCanteens, getStalls, addReview, voteReview, deleteReview, verifyAdmin, stallsData, getAllPosts, getOffcampusReviews, validateFudanEmail, generateCode, saveVerificationCode, verifyCode, isNicknameTaken, createUser, verifyUser, getUserByEmail, updateUserPassword, getAllUsers } = require('./database');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 
 function hashPassword(password) {
   return crypto.createHash('sha256').update(password + 'danshi_salt_2026').digest('hex');
